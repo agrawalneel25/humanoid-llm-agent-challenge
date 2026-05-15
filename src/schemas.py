@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 
 Direction = Literal["forward", "backward", "left", "right"]
-ActionName = Literal["move", "turn", "look"]
+ActionName = Literal["move", "turn", "look", "pick_up", "open", "finish"]
 
 
 @dataclass

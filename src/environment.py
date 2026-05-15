@@ -20,6 +20,8 @@ DELTAS: dict[str, Position] = {
 @dataclass
 class Cell:
     kind: str
+    locked: bool = False
+    open: bool = False
 
 
 @dataclass
@@ -34,6 +36,7 @@ class VirtualLab:
     height: int = 5
     position: Position = (1, 1)
     facing: str = "east"
+    inventory: list[str] = field(default_factory=list)
     step: int = 0
     last_result: StepResult = field(default_factory=lambda: StepResult(True, "start"))
 
@@ -45,6 +48,15 @@ class VirtualLab:
         for y in range(self.height):
             self.grid[(0, y)] = Cell("wall")
             self.grid[(self.width - 1, y)] = Cell("wall")
+        self.grid[(2, 2)] = Cell("wall")
+        self.grid[(3, 2)] = Cell("wall")
+        self.grid[(4, 1)] = Cell("door", locked=True, open=False)
+        self.grid[(1, 2)] = Cell("key")
+        self.grid[(5, 1)] = Cell("red_cube")
+
+    @property
+    def goal(self) -> str:
+        return "Find the key, open the locked lab door, reach the red cube, and finish."
 
     def observe(self) -> dict[str, Any]:
         visible = []
@@ -52,17 +64,21 @@ class VirtualLab:
         for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]:
             pos = (px + dx, py + dy)
             cell = self.grid.get(pos, Cell("empty"))
-            visible.append(
-                {
-                    "relative": [dx, dy],
-                    "position": [pos[0], pos[1]],
-                    "type": cell.kind,
-                }
-            )
+            item: dict[str, Any] = {
+                "relative": [dx, dy],
+                "position": [pos[0], pos[1]],
+                "type": cell.kind,
+            }
+            if cell.kind == "door":
+                item["locked"] = cell.locked
+                item["open"] = cell.open
+            visible.append(item)
         return {
             "step": self.step,
             "position": [px, py],
             "facing": self.facing,
+            "inventory": list(self.inventory),
+            "goal": self.goal,
             "visible_cells": visible,
             "last_action": {
                 "ok": self.last_result.ok,
@@ -79,10 +95,19 @@ class VirtualLab:
             result = self._turn(action.direction)
         elif name == "move":
             result = self._move(action.direction)
+        elif name == "pick_up":
+            result = self._pick_up()
+        elif name == "open":
+            result = self._open(action.direction)
+        elif name == "finish":
+            result = StepResult(self.is_success(), "success" if self.is_success() else "goal not complete")
         else:
             result = StepResult(False, f"unknown action: {name}")
         self.last_result = result
         return result
+
+    def is_success(self) -> bool:
+        return self.position == (5, 1) and "key" in self.inventory and self.grid[(4, 1)].open
 
     def _turn(self, direction: str | None) -> StepResult:
         if direction not in {"left", "right"}:
@@ -98,8 +123,31 @@ class VirtualLab:
         cell = self.grid.get(target, Cell("empty"))
         if cell.kind == "wall":
             return StepResult(False, f"blocked by wall at {target}")
+        if cell.kind == "door" and not cell.open:
+            return StepResult(False, f"blocked by closed door at {target}")
         self.position = target
         return StepResult(True, f"moved to {target}")
+
+    def _pick_up(self) -> StepResult:
+        cell = self.grid.get(self.position, Cell("empty"))
+        if cell.kind != "key":
+            return StepResult(False, "nothing to pick up")
+        self.inventory.append("key")
+        self.grid[self.position] = Cell("empty")
+        return StepResult(True, "picked up key")
+
+    def _open(self, direction: str | None) -> StepResult:
+        target = self._relative_position(direction)
+        if target is None:
+            return StepResult(False, "open requires forward/backward/left/right")
+        cell = self.grid.get(target, Cell("empty"))
+        if cell.kind != "door":
+            return StepResult(False, f"no door at {target}")
+        if cell.locked and "key" not in self.inventory:
+            return StepResult(False, "door is locked and key is missing")
+        cell.locked = False
+        cell.open = True
+        return StepResult(True, f"opened door at {target}")
 
     def _relative_position(self, direction: str | None) -> Position | None:
         if direction not in {"forward", "backward", "left", "right"}:
