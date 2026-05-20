@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import argparse
 
-from .agent import ScriptedAgent
+from .agent import OpenAIAgent, ScriptedAgent
 from .environment import VirtualLab
 
 
-def run(max_steps: int) -> int:
+def run(agent_name: str, model: str, max_steps: int) -> int:
     env = VirtualLab()
-    agent = ScriptedAgent()
+    agent = OpenAIAgent(model) if agent_name == "openai" else ScriptedAgent()
     for _ in range(max_steps):
         obs = env.observe()
         action = agent.choose_action(obs)
@@ -33,9 +33,11 @@ def run(max_steps: int) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--agent", choices=["scripted", "openai"], default="scripted")
+    parser.add_argument("--model", default="gpt-4o-mini")
     parser.add_argument("--max-steps", type=int, default=30)
     args = parser.parse_args()
-    raise SystemExit(run(args.max_steps))
+    raise SystemExit(run(args.agent, args.model, args.max_steps))
 
 
 if __name__ == "__main__":
