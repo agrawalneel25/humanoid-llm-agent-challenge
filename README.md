@@ -1,16 +1,16 @@
 # LLM Agent in a Virtual Robotics Lab
 
-This project drops an LLM-controlled agent into a small virtual robotics lab. The world is a deterministic 2D grid containing walls, a locked door, a key and a red calibration cube. The agent receives structured observations, picks one action per step from a fixed action space, and is graded on whether it actually finishes a concrete task.
+A small 2D grid world: walls, a locked door, a key, and a red cube. An LLM picks one action per step, the env validates it, and the agent has to actually reach the cube to win.
 
-Example task:
+The interesting bit is the harness, not the world. The world is intentionally tiny so the model has nowhere to hide.
+
+Goal:
 
 > Find the key, open the locked lab door, reach the red cube, and finish.
 
-The focus is the harness — the interface between the model and an environment it can act in — not the world itself.
+## Observation
 
-## Observation format
-
-Each step the agent receives compact JSON:
+Each step the model sees:
 
 ```json
 {
@@ -27,54 +27,46 @@ Each step the agent receives compact JSON:
 }
 ```
 
-The model sees only its local 4-neighbourhood plus the cell underneath it, its inventory, and the env's verdict on whatever it tried last.
+`visible_cells` is the 4-neighbourhood plus the cell under the agent — no oracle map.
 
-## Action space
+## Actions
 
-The model must produce one JSON action per step:
+One action per step:
 
 ```json
 {"action": "move", "direction": "forward"}
 ```
 
-Supported actions:
-
-- `move`: `forward`, `backward`, `left`, `right`
-- `turn`: `left`, `right`
+- `move` — forward / backward / left / right
+- `turn` — left / right
 - `look`
 - `pick_up`
-- `open`: `forward`, `backward`, `left`, `right`
+- `open` — forward / backward / left / right
 - `finish`
 
-Invalid actions are rejected and logged; the agent gets the rejection back in the next `last_action`.
+Invalid actions come back with `ok=False` and a message; the model gets the rejection in the next step's `last_action`.
 
 ## Run
 
-Scripted deterministic demo, no API key needed:
+Scripted demo (no API key):
 
-```bash
+```
 python -m src.run_demo --agent scripted
 ```
 
-OpenAI-backed LLM demo:
+LLM agent:
 
-```bash
+```
 pip install -r requirements.txt
-set OPENAI_API_KEY=your_key_here
+set OPENAI_API_KEY=...
 python -m src.run_demo --agent openai --model gpt-4o-mini
 ```
 
-PowerShell:
+PowerShell uses `$env:OPENAI_API_KEY="..."` instead of `set`.
 
-```powershell
-pip install -r requirements.txt
-$env:OPENAI_API_KEY="your_key_here"
-python -m src.run_demo --agent openai --model gpt-4o-mini
+## Example trajectory
+
 ```
-
-## Example output
-
-```text
 01 action=move right ok=True msg=moved to (1, 2)
 02 action=pick_up ok=True msg=picked up key
 03 action=move left ok=True msg=moved to (1, 1)
@@ -86,44 +78,22 @@ python -m src.run_demo --agent openai --model gpt-4o-mini
 09 action=finish ok=True msg=success
 ```
 
-A copy is saved in [examples/successful_run.log](examples/successful_run.log).
+Saved at [examples/successful_run.log](examples/successful_run.log).
 
 ## Tests
 
-```bash
+```
 python -m unittest discover -s tests
 ```
 
 ## Design notes
 
-### Observation representation
+**Observations.** Local 4-neighbourhood plus the cell under the agent, rather than the full map. The world is small enough that I could've just handed over the whole grid, but doing that lets the model pattern-match the layout instead of actually navigating — which defeats the point of the harness. Local sensing also matches how a real robot perceives. The cost is that anything bigger than this would need some kind of memory; the natural extension is an agent-maintained notes channel carried through `last_action`.
 
-The observation is JSON, not free text. The model gets `step`, `position`, `facing`, `inventory`, `goal`, `visible_cells` and `last_action`. Two non-obvious choices:
+The `last_action` echo does more work than it looks. It's the only feedback channel for "you tried something, here's what happened" — without it the model has no way to know an action was rejected and will just keep emitting the same invalid move.
 
-- **Local sensing only.** `visible_cells` is just the four neighbours plus the cell under the agent. A real robot doesn't get an oracle view of the room, and giving the LLM the full grid encouraged it to pattern-match on the map instead of acting on what it could currently see. Local sensing forces it to move and probe.
-- **The goal is in every observation.** It costs a few tokens, but means a step taken with a truncated history still has its objective. Useful when iterating on long runs.
-- **`last_action` echoes the env's verdict.** The model finds out within one step whether what it just tried was rejected, and why. This is most of how it self-corrects.
+**Actions.** Six verbs, all relative to facing. World-relative directions would be easier for the model, but they're not really what a robot does, and I wanted the harness to surface whether the model is reasoning about state. Invalid actions don't crash — they get rejected with `ok=False` and a human-readable message — which keeps the loop intact when the model hallucinates a direction.
 
-### Action space
+**Harness boundaries.** Only the env mutates state. The model returns a typed `AgentAction` and never touches the world directly. Success is checked from world state (`position == cube AND key in inventory AND door open`), not from the model claiming `finish`. The OpenAI integration uses structured outputs (pydantic schema → typed response), so there's no JSON-parsing fallback path. Free-form text + regex repair is where I'd expect most of a real harness's bugs to live, so the dependency felt worth it.
 
-Six verbs and a single optional `direction` (forward / backward / left / right). Two deliberate choices:
-
-- **Directions are agent-relative, not world-relative.** The model has to combine `facing` with the direction it wants. That's closer to how a robot actually controls itself, and it surfaces whether the model is genuinely reasoning about state vs. guessing.
-- **Invalid combinations don't crash.** `move` with no direction, `open` at a wall, `pick_up` on empty floor — all come back as `ok=False` with a human-readable message. The env stays the source of truth and the model gets a chance to react.
-
-### Harness boundaries
-
-- The model never mutates state directly. It returns one `AgentAction`, the env validates and applies it, and only then does the next observation get rendered.
-- Success is checked from world state — `position == cube AND key in inventory AND door open` — never from the model's `finish` claim. The agent has to actually be there.
-- The OpenAI integration uses structured outputs: the API is told the schema (pydantic `AgentAction`) and returns a typed object. No regex repair, no JSON-parsing fallbacks.
-
-### What worked, what didn't
-
-- **Worked:** schema-constrained sampling. Once the model couldn't emit free-form prose, the "agent picked an invalid action" failure mode disappeared.
-- **Worked:** echoing `last_action` back to the model. Cheaper than any kind of planning scaffolding and accounted for most of the recovery behaviour I saw.
-- **Didn't work:** asking the model to maintain its own map of the room across turns. It drifted within a few steps. Replaced with local sensing and a clear goal — the env carries the state, the model just decides the next move.
-- **Open:** there's no scratchpad / forced chain-of-thought. The `note` field on `AgentAction` is for trajectory debugging, not internal reasoning. On larger maps an explicit memory channel (e.g. agent-maintained notes the env passes back) would probably matter.
-
-### Why this shape of project
-
-Robotics software needs clean boundaries between perception, planning and actuation. This environment mirrors that discipline at toy scale: the LLM can reason, but it can only change the world through validated actions; success is measured from state, not narration; every step is logged and replayable.
+**What I didn't do.** No chain-of-thought scaffolding, no planning step. The `note` field on the action is for trajectory debugging only, not internal reasoning. For larger or sparser maps that would matter; for this one, single-shot decisions are fine.
