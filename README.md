@@ -27,7 +27,7 @@ Each step the model sees:
 }
 ```
 
-`visible_cells` is the 4-neighbourhood plus the cell under the agent — no oracle map.
+`visible_cells` is the 4-neighbourhood plus the cell under the agent. There is no oracle map.
 
 ## Actions
 
@@ -37,11 +37,11 @@ One action per step:
 {"action": "move", "direction": "forward"}
 ```
 
-- `move` — forward / backward / left / right
-- `turn` — left / right
+- `move`: forward / backward / left / right
+- `turn`: left / right
 - `look`
 - `pick_up`
-- `open` — forward / backward / left / right
+- `open`: forward / backward / left / right
 - `finish`
 
 Invalid actions come back with `ok=False` and a message; the model gets the rejection in the next step's `last_action`.
@@ -78,7 +78,7 @@ PowerShell uses `$env:OPENAI_API_KEY="..."` instead of `set`.
 09 action=finish ok=True msg=success
 ```
 
-Saved at [examples/successful_run.log](examples/successful_run.log).
+Saved at [results/scripted_run.log](results/scripted_run.log).
 
 ## Tests
 
@@ -88,12 +88,19 @@ python -m unittest discover -s tests
 
 ## Design notes
 
-**Observations.** Local 4-neighbourhood plus the cell under the agent, rather than the full map. The world is small enough that I could've just handed over the whole grid, but doing that lets the model pattern-match the layout instead of actually navigating — which defeats the point of the harness. Local sensing also matches how a real robot perceives. The cost is that anything bigger than this would need some kind of memory; the natural extension is an agent-maintained notes channel carried through `last_action`.
+**Observations.** Local 4-neighbourhood plus the cell under the agent, rather than the full map. The world is small enough that I could've just handed over the whole grid, but doing that lets the model pattern-match the layout instead of actually navigating, which defeats the point of the harness. Local sensing also matches how a real robot perceives. The cost is that anything bigger than this would need some form of memory; the natural extension is an agent-maintained notes channel carried through `last_action`.
 
-The `last_action` echo does more work than it looks. It's the only feedback channel for "you tried something, here's what happened" — without it the model has no way to know an action was rejected and will just keep emitting the same invalid move.
+The `last_action` echo does more work than it looks. It is the only feedback channel for "you tried something, here is what happened". Without it the model has no way to know an action was rejected and will just keep emitting the same invalid move.
 
-**Actions.** Six verbs, all relative to facing. World-relative directions would be easier for the model, but they're not really what a robot does, and I wanted the harness to surface whether the model is reasoning about state. Invalid actions don't crash — they get rejected with `ok=False` and a human-readable message — which keeps the loop intact when the model hallucinates a direction.
+**Actions.** Six verbs, all relative to facing. World-relative directions would be easier for the model, but they are not what a robot actually does, and I wanted the harness to surface whether the model is reasoning about state. Invalid actions do not crash. They get rejected with `ok=False` and a human-readable message, which keeps the loop intact when the model hallucinates a direction.
 
-**Harness boundaries.** Only the env mutates state. The model returns a typed `AgentAction` and never touches the world directly. Success is checked from world state (`position == cube AND key in inventory AND door open`), not from the model claiming `finish`. The OpenAI integration uses structured outputs (pydantic schema → typed response), so there's no JSON-parsing fallback path. Free-form text + regex repair is where I'd expect most of a real harness's bugs to live, so the dependency felt worth it.
+**Harness boundaries.** Only the env mutates state. The model returns a typed `AgentAction` and never touches the world directly. Success is checked from world state (`position == cube AND key in inventory AND door open`), not from the model claiming `finish`. The OpenAI integration uses structured outputs: pydantic schema gives a typed response, so there is no JSON-parsing fallback path. Free-form text plus regex repair is where I would expect most of a real harness's bugs to live, so the dependency felt worth it.
 
 **What I didn't do.** No chain-of-thought scaffolding, no planning step. The `note` field on the action is for trajectory debugging only, not internal reasoning. For larger or sparser maps that would matter; for this one, single-shot decisions are fine.
+
+## Limitations
+
+- The world is hand-built and tiny. A scripted plan reaches success in nine steps. The point is the harness, but a fairer LLM evaluation would procedurally generate rooms.
+- LLM evaluation is qualitative. There is no batch comparison across seeds or models; running `--agent openai` once shows the loop works, not how well it works on average.
+- The `note` field is debug-only. The model does not use it for memory, so anything that requires remembering more than the last action would need extra observation fields.
+- Tests cover the env. The OpenAI client is exercised only when an `OPENAI_API_KEY` is present, and there is no mocked integration test.
