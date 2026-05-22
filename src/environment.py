@@ -61,6 +61,8 @@ class VirtualLab:
     def observe(self) -> dict[str, Any]:
         visible = []
         px, py = self.position
+        # 4-neighbourhood + current cell only. Tried the full grid first; model
+        # stopped navigating and just read coordinates off the map.
         for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0), (0, 0)]:
             pos = (px + dx, py + dy)
             cell = self.grid.get(pos, Cell("empty"))
