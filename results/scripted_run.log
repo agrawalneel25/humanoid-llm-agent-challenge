@@ -1,9 +1,70 @@
+initial state:
+#######
+#>..DR#
+#K##..#
+#.....#
+#######
+
 01 action=move right ok=True msg=moved to (1, 2)
+#######
+#...DR#
+#>##..#
+#.....#
+#######
+
 02 action=pick_up ok=True msg=picked up key
+#######
+#...DR#
+#>##..#
+#.....#
+#######
+
 03 action=move left ok=True msg=moved to (1, 1)
+#######
+#>..DR#
+#.##..#
+#.....#
+#######
+
 04 action=move forward ok=True msg=moved to (2, 1)
+#######
+#.>.DR#
+#.##..#
+#.....#
+#######
+
 05 action=move forward ok=True msg=moved to (3, 1)
+#######
+#..>DR#
+#.##..#
+#.....#
+#######
+
 06 action=open forward ok=True msg=opened door at (4, 1)
+#######
+#..>/R#
+#.##..#
+#.....#
+#######
+
 07 action=move forward ok=True msg=moved to (4, 1)
+#######
+#...>R#
+#.##..#
+#.....#
+#######
+
 08 action=move forward ok=True msg=moved to (5, 1)
+#######
+#.../>#
+#.##..#
+#.....#
+#######
+
 09 action=finish ok=True msg=success
+#######
+#.../>#
+#.##..#
+#.....#
+#######
+

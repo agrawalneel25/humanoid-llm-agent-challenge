@@ -16,6 +16,8 @@ DELTAS: dict[str, Position] = {
     "west": (-1, 0),
 }
 
+GLYPHS: dict[str, str] = {"north": "^", "east": ">", "south": "v", "west": "<"}
+
 
 @dataclass
 class Cell:
@@ -31,32 +33,65 @@ class StepResult:
 
 
 @dataclass
+class WorldConfig:
+    width: int
+    height: int
+    agent_start: Position
+    agent_facing: str
+    interior_walls: set[Position]
+    key: Position
+    door: Position
+    cube: Position
+    goal_text: str = "Find the key, open the locked lab door, reach the red cube, and finish."
+
+
+def make_default_world() -> WorldConfig:
+    return WorldConfig(
+        width=7,
+        height=5,
+        agent_start=(1, 1),
+        agent_facing="east",
+        interior_walls={(2, 2), (3, 2)},
+        key=(1, 2),
+        door=(4, 1),
+        cube=(5, 1),
+    )
+
+
+@dataclass
 class VirtualLab:
-    width: int = 7
-    height: int = 5
-    position: Position = (1, 1)
-    facing: str = "east"
+    config: WorldConfig = field(default_factory=make_default_world)
     inventory: list[str] = field(default_factory=list)
     step: int = 0
     last_result: StepResult = field(default_factory=lambda: StepResult(True, "start"))
 
     def __post_init__(self) -> None:
+        self.position: Position = self.config.agent_start
+        self.facing: str = self.config.agent_facing
         self.grid: dict[Position, Cell] = {}
-        for x in range(self.width):
+        for x in range(self.config.width):
             self.grid[(x, 0)] = Cell("wall")
-            self.grid[(x, self.height - 1)] = Cell("wall")
-        for y in range(self.height):
+            self.grid[(x, self.config.height - 1)] = Cell("wall")
+        for y in range(self.config.height):
             self.grid[(0, y)] = Cell("wall")
-            self.grid[(self.width - 1, y)] = Cell("wall")
-        self.grid[(2, 2)] = Cell("wall")
-        self.grid[(3, 2)] = Cell("wall")
-        self.grid[(4, 1)] = Cell("door", locked=True, open=False)
-        self.grid[(1, 2)] = Cell("key")
-        self.grid[(5, 1)] = Cell("red_cube")
+            self.grid[(self.config.width - 1, y)] = Cell("wall")
+        for wall in self.config.interior_walls:
+            self.grid[wall] = Cell("wall")
+        self.grid[self.config.door] = Cell("door", locked=True, open=False)
+        self.grid[self.config.key] = Cell("key")
+        self.grid[self.config.cube] = Cell("red_cube")
+
+    @property
+    def width(self) -> int:
+        return self.config.width
+
+    @property
+    def height(self) -> int:
+        return self.config.height
 
     @property
     def goal(self) -> str:
-        return "Find the key, open the locked lab door, reach the red cube, and finish."
+        return self.config.goal_text
 
     def observe(self) -> dict[str, Any]:
         visible = []
@@ -88,6 +123,30 @@ class VirtualLab:
             },
         }
 
+    def render(self) -> str:
+        rows: list[str] = []
+        for y in range(self.config.height):
+            row: list[str] = []
+            for x in range(self.config.width):
+                pos = (x, y)
+                if pos == self.position:
+                    row.append(GLYPHS[self.facing])
+                    continue
+                cell = self.grid.get(pos, Cell("empty"))
+                kind = cell.kind
+                if kind == "wall":
+                    row.append("#")
+                elif kind == "key":
+                    row.append("K")
+                elif kind == "door":
+                    row.append("/" if cell.open else "D")
+                elif kind == "red_cube":
+                    row.append("R")
+                else:
+                    row.append(".")
+            rows.append("".join(row))
+        return "\n".join(rows)
+
     def apply(self, action: AgentAction) -> StepResult:
         self.step += 1
         name = action.action
@@ -109,7 +168,11 @@ class VirtualLab:
         return result
 
     def is_success(self) -> bool:
-        return self.position == (5, 1) and "key" in self.inventory and self.grid[(4, 1)].open
+        return (
+            self.position == self.config.cube
+            and "key" in self.inventory
+            and self.grid[self.config.door].open
+        )
 
     def _turn(self, direction: str | None) -> StepResult:
         if direction not in {"left", "right"}:

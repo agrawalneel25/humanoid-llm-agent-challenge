@@ -1,2 +1,3 @@
-openai>=1.0.0
-pydantic>=2.0.0
+# No third-party dependencies. The scripted agent, benchmark, and tests are
+# stdlib only. The OpenAI agent uses stdlib urllib against the Responses API
+# and only needs OPENAI_API_KEY in the environment.

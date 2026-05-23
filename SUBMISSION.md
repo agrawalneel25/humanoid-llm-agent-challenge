@@ -4,24 +4,37 @@
 
 ## What I built
 
-An LLM agent harness for a small 2D grid world. The world contains walls, a locked door, a key, and a red cube. The agent receives structured JSON observations of its local surroundings, returns one typed action per step, and is judged on whether it actually reaches the goal cell with the key in inventory and the door open.
+An LLM agent harness for a small 2D grid world. The world contains walls, a locked door, a key, and a red cube. The agent receives a structured JSON observation of its local surroundings, returns one typed action per step, and is judged on whether it actually reaches the goal cell with the key in inventory and the door open.
 
-The focus is the harness, not the world. The env is the source of truth: it validates every action, rejects invalid ones with a readable message, and checks success from world state rather than from the model's claim.
+The focus is the harness, not the world. The env is the source of truth: it validates every action, rejects invalid ones with a readable message, and checks success from world state rather than the model's claim.
+
+On top of the default hand-built world, the repo also includes a procedural room generator, a BFS solver, and a small benchmark that runs the scripted agent across 20 random rooms.
 
 ## How to run
 
-Scripted baseline (no API key):
+No third-party dependencies. Scripted baseline:
 
 ```
-python -m src.run_demo --agent scripted
+python -m src.run_demo --agent scripted --render
 ```
 
-LLM agent:
+Procedurally generated room:
 
 ```
-pip install -r requirements.txt
+python -m src.run_demo --agent scripted --seed 7 --render
+```
+
+LLM agent (needs `OPENAI_API_KEY`):
+
+```
 set OPENAI_API_KEY=...
 python -m src.run_demo --agent openai --model gpt-4o-mini
+```
+
+Procedural benchmark across 20 seeds:
+
+```
+python -m src.benchmark --num-seeds 20
 ```
 
 Tests:
@@ -32,32 +45,37 @@ python -m unittest discover -s tests
 
 ## What I measured
 
-[results/metrics.md](results/metrics.md) summarises the scripted baseline: 9 steps to success, 0 invalid actions, deterministic. The same loop drives the LLM agent; I did not run a batch comparison across models or seeds.
+[results/scripted_run.log](results/scripted_run.log) is the full rendered trajectory for the default world: 9 steps, 0 invalid actions, success.
 
-## What is in the box
+[results/benchmark.md](results/benchmark.md) is the procedural batch: 20 random 9x7 rooms, **20/20 success, mean 13.2 steps, 0 invalid actions**. The BFS solver drives the scripted agent for each layout.
+
+## Repository layout
 
 | path | purpose |
 | --- | --- |
-| `src/environment.py` | grid world, observation, action validation, success check |
-| `src/schemas.py` | pydantic action schema for structured outputs |
-| `src/agent.py` | `ScriptedAgent` (baseline) and `OpenAIAgent` (LLM) |
-| `src/run_demo.py` | CLI runner: picks an agent and loops to goal or step limit |
-| `tests/test_environment.py` | success path and locked-door failure path |
-| `results/scripted_run.log` | full trajectory of the scripted baseline |
-| `results/metrics.md` | one-page summary of what the scripted run shows |
+| `src/environment.py` | grid env, observation, action validation, success check, ASCII render |
+| `src/schemas.py` | `AgentAction` dataclass (one action per step) |
+| `src/worlds.py` | `make_default_world`, procedural `generate_room(seed)` |
+| `src/solver.py` | BFS over (position, has_key, door_open) returning an env-compatible plan |
+| `src/agent.py` | `ScriptedAgent` (BFS-driven baseline) and `OpenAIAgent` (Responses API via urllib) |
+| `src/run_demo.py` | CLI: pick agent, optional seed for procedural world, optional `--render` |
+| `src/benchmark.py` | CLI: run scripted agent over N seeds, emit a markdown table |
+| `tests/` | 15 tests covering env, solver, procedural generator |
+| `results/` | scripted trajectory and benchmark table |
 
 ## Design choices
 
-Full notes are in the README under "Design notes". One-line summary of the four choices:
+Full notes are in the README under "Design notes". Headline summary:
 
-- Local 4-neighbourhood observation (not full map), so the model has to navigate rather than read coordinates.
-- Six verbs with directions relative to facing, so the harness surfaces state reasoning.
-- Structured outputs (pydantic schema), so there is no JSON-parsing fallback path.
-- Success checked from world state, not the model claiming `finish`.
+- **Local sensing only.** The 4-neighbourhood plus the cell under the agent. Full map made the model pattern-match instead of navigate.
+- **Agent-relative actions.** Six verbs with directions relative to facing. World-relative would be easier but masks whether the model is reasoning about state.
+- **Env is the source of truth.** Invalid actions return `ok=False` with a message; success is checked from world state, never from a `finish` claim.
+- **BFS baseline.** The scripted agent uses BFS over `(position, has_key, door_open)` to produce a shortest plan; same action contract as the LLM agent, so the comparison is honest.
+- **No SDK dependency.** The OpenAI integration uses stdlib `urllib` against the Responses API.
 
 ## Limitations
 
-- The world is hand-built and tiny. Procedural generation would be the natural next step.
-- The LLM agent has been exercised end-to-end but not benchmarked across seeds or models.
-- The `note` field on actions is debug-only; the model has no separate memory channel.
-- No CI matrix yet across Python versions.
+- Procedural rooms are single-divider, single-door. Richer layouts would need a different generator.
+- The LLM agent has been exercised end-to-end but not batch-evaluated across models or seeds.
+- The `note` field is debug-only; the model has no memory channel beyond `last_action`.
+- BFS planning ignores `turn`, so the scripted agent never turns.
